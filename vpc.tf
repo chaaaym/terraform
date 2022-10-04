@@ -15,6 +15,7 @@ resource "aws_internet_gateway" "project-igw" {
   }
 }
 
+# 탄력적 IP 생성
 resource "aws_eip" "nat" {
   vpc      = true
 }
