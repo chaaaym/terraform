@@ -25,7 +25,7 @@ resource "aws_subnet" "project-bastion" {
   vpc_id                  = aws_vpc.project-vpc.id
   cidr_block              = "10.60.1.0/24"
   availability_zone       = "ap-northeast-2a"
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = true ## 퍼블릭 IPv4 주소 자동으로 할당하도록 하는 설정을 걸어 주어야 함
   tags = {
     Name = "project-bastion"
   }
