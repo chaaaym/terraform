@@ -129,8 +129,8 @@ resource "aws_iam_policy" "project_policy" {
                     ]
                 }
             }
-        }
-    {       
+        },
+        {       
             "Effect": "Allow",
             "Action": [
                 "codepipeline:*",
