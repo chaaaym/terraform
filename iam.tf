@@ -306,7 +306,7 @@ resource "aws_iam_role_policy_attachment" "project_role_attach" {
 }
 
 resource "aws_iam_instance_profile" "project_role_profile" {
-    name = "project_role__profile"
+    name = "project_role_profile"
     role = aws_iam_role.project_role.name
 }
 
