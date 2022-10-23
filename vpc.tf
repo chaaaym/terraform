@@ -1,10 +1,21 @@
-# VPC 구간
+# VPC 생성
 resource "aws_vpc" "project-vpc" {
   cidr_block           = "10.60.0.0/16"
   enable_dns_hostnames = true
+  enable_dns_support = true
   tags = {
     Name = "project-vpc"
   }
+}
+
+# DHCP 옵션 설정
+resource "aws_vpc_dhcp_options" "dhcp" {
+    domain_name_servers = ["AmazonProvidedDNS"]
+}
+
+resource "aws_vpc_dhcp_options_association" "dhcp" {
+  vpc_id          = aws_vpc.project-vpc.id
+  dhcp_options_id = aws_vpc_dhcp_options.dhcp.id
 }
 
 # 인터넷 게이트웨이 생성
@@ -18,61 +29,118 @@ resource "aws_internet_gateway" "project-igw" {
 # 탄력적 IP 생성
 resource "aws_eip" "nat" {
   vpc      = true
-}
-
-# Subnet 구간
-resource "aws_subnet" "project-bastion" {
-  vpc_id                  = aws_vpc.project-vpc.id
-  cidr_block              = "10.60.1.0/24"
-  availability_zone       = "ap-northeast-2a"
-  map_public_ip_on_launch = true ## 퍼블릭 IPv4 주소 자동으로 할당하도록 하는 설정을 걸어 주어야 함
   tags = {
-    Name = "project-bastion"
+    Name = "project-nat"
   }
 }
 
-resource "aws_subnet" "project-pri-1" {
+# NAT 게이트웨이 생성
+resource "aws_nat_gateway" "project-nat" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.project-pub-web.id
+
+  tags = {
+    Name = "project-nat"
+  }
+
+  depends_on = [aws_internet_gateway.project-igw]
+}
+
+# Subnet 생성
+resource "aws_subnet" "project-pub-web" {
   vpc_id            = aws_vpc.project-vpc.id
-  cidr_block        = "10.60.10.0/24"
+  cidr_block        = "10.60.1.0/24"
+  availability_zone = "ap-northeast-2a"
+  map_public_ip_on_launch = true
+  tags = {
+    Name = "project-pub-web"
+  }
+}
+
+resource "aws_subnet" "project-pri-was-1" {
+  vpc_id            = aws_vpc.project-vpc.id
+  cidr_block        = "10.60.2.0/24"
   availability_zone = "ap-northeast-2a"
   tags = {
-    Name = "project-pri-1"
+    Name = "project-pri-was-1"
   }
 }
 
-resource "aws_subnet" "project-pri-2" {
+resource "aws_subnet" "project-pri-was-2" {
   vpc_id            = aws_vpc.project-vpc.id
   cidr_block        = "10.60.20.0/24"
-  availability_zone = "ap-northeast-2a"
+  availability_zone = "ap-northeast-2c"
   tags = {
-    Name = "project-pri-2"
+    Name = "project-pri-was-2
+    "
   }
 }
 
-resource "aws_subnet" "project-pri-3" {
+resource "aws_subnet" "project-pri-db-1" {
   vpc_id            = aws_vpc.project-vpc.id
-  cidr_block        = "10.60.30.0/24"
+  cidr_block        = "10.60.3.0/24"
   availability_zone = "ap-northeast-2a"
   tags = {
-    Name = "project-pri-3"
+    Name = "project-pri-db-1"
+  }
+}
+
+resource "aws_subnet" "project-pri-db-2" {
+  vpc_id            = aws_vpc.project-vpc.id
+  cidr_block        = "10.60.30.0/24"
+  availability_zone = "ap-northeast-2c"
+  tags = {
+    Name = "project-pri-db-2"
   }
 }
 
 # public 라우팅 테이블 생성
-resource "aws_route_table" "project-bastion-rt" {
+resource "aws_route_table" "project-pub-rt" {
   vpc_id = aws_vpc.project-vpc.id
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.project-igw.id
   }
   tags = {
-    Name = "project-bastion-rt"
+    Name = "project-pub-rt"
   }
 }
 
-resource "aws_route_table_association" "project-bastion-rt" {
-  subnet_id      = aws_subnet.project-bastion.id
-  route_table_id = aws_route_table.project-bastion-rt.id
+resource "aws_route_table_association" "project-pub-rt-association" {
+  subnet_id      = aws_subnet.project-pub-web.id
+  route_table_id = aws_route_table.project-pub-rt.id
+}
+
+# Private 라우팅 테이블 생성
+resource "aws_route_table" "project-pri-rt" {
+  vpc_id = aws_vpc.project-vpc.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_nat_gateway.project-nat.id
+  }
+  tags = {
+    Name = "project-pri-rt"
+  }
+}
+
+resource "aws_route_table_association" "project-pri-was-1-rt-association" {
+  subnet_id      = aws_subnet.project-pri-was-1.id
+  route_table_id = aws_route_table.project-pri-rt.id
+}
+
+resource "aws_route_table_association" "project-pri-was-2-rt-association" {
+  subnet_id      = aws_subnet.project-pri-was-2.id
+  route_table_id = aws_route_table.project-pri-rt.id
+}
+
+resource "aws_route_table_association" "project-pri-db-1-rt-association" {
+  subnet_id      = aws_subnet.project-pri-db-1.id
+  route_table_id = aws_route_table.project-pri-rt.id
+}
+
+resource "aws_route_table_association" "project-pri-db-2-rt-association" {
+  subnet_id      = aws_subnet.project-pri-db-2.id
+  route_table_id = aws_route_table.project-pri-rt.id
 }
 
 # Public Security Group 생성
@@ -85,20 +153,8 @@ resource "aws_security_group" "project-vpc-pub-sg" {
   }
 }
 
-## Public Security Group inbound rule
-resource "aws_security_group_rule" "HTTP80" {
-  type = "ingress"
-  from_port = 80
-  to_port = 80
-  protocol = "TCP"
-  cidr_blocks = [ "0.0.0.0/0" ]
-  security_group_id = aws_security_group.project-vpc-pub-sg.id
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "aws_security_group_rule" "SSH" {
+## Public Security Group inbound rule 연결
+resource "aws_security_group_rule" "SSHpubin" {
   type = "ingress"
   from_port = 22
   to_port = 22
@@ -110,10 +166,10 @@ resource "aws_security_group_rule" "SSH" {
   }
 }
 
-resource "aws_security_group_rule" "HTTP8080" {
+resource "aws_security_group_rule" "HTTPpubin" {
   type = "ingress"
-  from_port = 8080
-  to_port = 8080
+  from_port = 80
+  to_port = 80
   protocol = "TCP"
   cidr_blocks = [ "0.0.0.0/0" ]
   security_group_id = aws_security_group.project-vpc-pub-sg.id
@@ -122,24 +178,145 @@ resource "aws_security_group_rule" "HTTP8080" {
   }
 }
 
-# Private Security Group
-resource "aws_security_group" "project-vpc-pri-sg" {
+resource "aws_security_group_rule" "ICMPpubin" {
+  type = "ingress"
+  from_port = -1
+  to_port = -1
+  protocol = "ICMP"
+  cidr_blocks = [ "0.0.0.0/0" ]
+  security_group_id = aws_security_group.project-vpc-pub-sg.id
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_security_group_rule" "AllTCPpubout" {
+  type = "egress"
+  from_port = 0
+  to_port = 0
+  protocol = "-1"
+  cidr_blocks = [ "0.0.0.0/0" ]
+  security_group_id = aws_security_group.project-vpc-pub-sg.id
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Private Security Group 생성
+# was
+resource "aws_security_group" "project-vpc-was-sg" {
   vpc_id = aws_vpc.project-vpc.id
-  name = "project-vpc-pri-sg"
-  description = "project-vpc-pri-sg"
+  name = "project-vpc-was-sg"
+  description = "project-vpc-was-sg"
   tags = {
-    Name = "private SG"
+    Name = "private was SG"
+  }
+}
+
+# db
+resource "aws_security_group" "project-vpc-db-sg" {
+  vpc_id = aws_vpc.project-vpc.id
+  name = "project-vpc-db-sg"
+  description = "project-vpc-db-sg"
+  tags = {
+    Name = "private db SG"
   }
 }
 
 ## Private Security Group inbound rules
-resource "aws_security_group_rule" "DB" {
+## was rule
+resource "aws_security_group_rule" "SSHpriwasin" {
+  type = "ingress"
+  from_port = 22
+  to_port = 22
+  protocol = "TCP"
+  cidr_blocks = [ "10.60.0.0/16" ]
+  security_group_id = aws_security_group.project-vpc-was-sg.id
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_security_group_rule" "HTTPpriwasin" {
+  type = "ingress"
+  from_port = 8080
+  to_port = 8080
+  protocol = "TCP"
+  cidr_blocks = [ "10.60.0.0/16" ]
+  security_group_id = aws_security_group.project-vpc-was-sg.id
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_security_group_rule" "ICMPpriwasin" {
+  type = "ingress"
+  from_port = -1
+  to_port = -1
+  protocol = "ICMP"
+  cidr_blocks = [ "0.0.0.0/0" ]
+  security_group_id = aws_security_group.project-vpc-was-sg.id
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_security_group_rule" "AllTCPpriwasout" {
+  type = "egress"
+  from_port = 0
+  to_port = 0
+  protocol = "-1"
+  cidr_blocks = [ "0.0.0.0/0" ]
+  security_group_id = aws_security_group.project-vpc-was-sg.id
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+## db rule
+resource "aws_security_group_rule" "dbSSHin" {
+  type = "ingress"
+  from_port = 22
+  to_port = 22
+  protocol = "TCP"
+  cidr_blocks = [ "10.60.0.0/16" ]
+  security_group_id = aws_security_group.project-vpc-db-sg.id
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_security_group_rule" "DBrulein" {
   type = "ingress"
   from_port = 3306
   to_port = 3306
   protocol = "TCP"
-  security_group_id = aws_security_group.project-vpc-pri-sg.id
-  source_security_group_id = aws_security_group.project-vpc-pri-sg.id
+  cidr_blocks = [ "10.60.0.0/16" ]
+  security_group_id = aws_security_group.project-vpc-db-sg.id
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_security_group_rule" "ICMPpridbin" {
+  type = "ingress"
+  from_port = -1
+  to_port = -1
+  protocol = "ICMP"
+  cidr_blocks = [ "0.0.0.0/0" ]
+  security_group_id = aws_security_group.project-vpc-db-sg.id
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_security_group_rule" "AllTCPpridbout" {
+  type = "egress"
+  from_port = 0
+  to_port = 0
+  protocol = "-1"
+  cidr_blocks = [ "0.0.0.0/0" ]
+  security_group_id = aws_security_group.project-vpc-db-sg.id
   lifecycle {
     create_before_destroy = true
   }
