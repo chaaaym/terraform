@@ -5,5 +5,5 @@ variable "region" {
 
 variable "github_token" {
     description = "github token" 
-    default     = "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"
+    default     = "ghp_"
 }
